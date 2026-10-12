@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Ozon Catcher</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+:root{--bg:#0a0e1a;--card:#121a2e;--card2:#192340;--line:#24304f;--blue:#005bff;--pink:#f91155;--mut:#8b96b3;--ok:#22c55e}
+*{-webkit-tap-highlight-color:transparent;box-sizing:border-box}
+html,body{background:var(--bg);color:#fff;font-family:-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;margin:0}
+body{padding-top:env(safe-area-inset-top,0);padding-bottom:calc(76px + env(safe-area-inset-bottom,0))}
+.grad{background:linear-gradient(135deg,var(--blue),var(--pink))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px}
+.mut{color:var(--mut)}
+.lbl{font-size:13px;color:var(--mut);margin-bottom:6px;display:block}
+.inp{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:13px 14px;color:#fff;font-size:16px;outline:none;appearance:none;-webkit-appearance:none}
+.inp:focus{border-color:var(--blue)}
+.btn{width:100%;border:0;border-radius:14px;padding:15px;font-size:16px;font-weight:700;color:#fff;transition:transform .1s,opacity .2s}
+.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.5}
+.btn-sec{background:var(--card2);border:1px solid var(--line)}
+.btn-stop{background:transparent;border:2px solid var(--pink);color:var(--pink)}
+.seg{display:flex;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:transparent;color:var(--mut);padding:10px 4px;border-radius:9px;font-size:14px;font-weight:600}
+.seg button.on{background:var(--card2);color:#fff;box-shadow:inset 0 0 0 1px var(--blue)}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;padding:5px 10px;border-radius:99px;background:var(--card2);border:1px solid var(--line)}
+.dot{width:8px;height:8px;border-radius:50%}
+.on-dot{background:var(--ok);animation:pulse 1.6s infinite}
+.off-dot{background:var(--pink)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.6)}100%{box-shadow:0 0 0 9px rgba(34,197,94,0)}}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:rgba(10,14,26,.94);backdrop-filter:blur(14px);border-top:1px solid var(--line);padding:8px 8px calc(8px + env(safe-area-inset-bottom,0))}
+nav button{flex:1;border:0;background:transparent;color:var(--mut);font-size:12px;font-weight:600;padding:6px 0;display:flex;flex-direction:column;align-items:center;gap:3px}
+nav button.on{color:#fff}
+nav button.on svg{stroke:url(#g)}
+nav svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#toast{position:fixed;left:16px;right:16px;bottom:calc(90px + env(safe-area-inset-bottom,0));background:#2a1420;border:1px solid var(--pink);border-radius:14px;padding:13px 16px;font-weight:600;font-size:15px;opacity:0;pointer-events:none;transition:opacity .25s;z-index:50}
+#toast.show{opacity:1}
+@media (prefers-reduced-motion:reduce){.on-dot{animation:none}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b82ff"/><stop offset="1" stop-color="#f91155"/></linearGradient></defs></svg>
+
+<main id="app" class="px-4 pt-4 max-w-xl mx-auto"></main>
+
+<nav>
+  <button data-act="tab" data-v="catch"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/></svg>Ловля</button>
+  <button data-act="tab" data-v="balance"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="3"/><path d="M16 12.5h2M3 10h18"/></svg>Баланс</button>
+  <button data-act="tab" data-v="account"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>Аккаунт</button>
+</nav>
+<div id="toast"></div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor('#0a0e1a'); tg.setBackgroundColor('#0a0e1a'); } catch (e) {} }
+const INIT = (tg && tg.initData) || '';
+const DEMO = !INIT; // вне Telegram работает демо-режим без сервера
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const rub = n => Number(n || 0).toLocaleString('ru-RU', {maximumFractionDigits: 2}) + ' ₽';
+const hap = () => { try { tg.HapticFeedback.impactOccurred('light'); } catch (e) {} };
+
+let S = null, F = {}, tab = 'catch', busy = false, codeSent = false, phoneVal = '';
+
+/* ---------- API ---------- */
+async function api(path, body) {
+  if (DEMO) return mock(path, body);
+  const r = await fetch(path, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Init-Data': INIT},
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || ('Ошибка ' + r.status));
+  return d;
+}
+
+const demo = {balance: 300, price: 100, worker_running: false, ozon_linked: false, phone: '',
+  warehouse: 'Ростов-на-Дону', warehouses: ['Ростов-на-Дону', 'Москва — Хоругвино', 'Санкт-Петербург — Шушары'],
+  min_rate: 0, rate_type: 'shift', time_filter: 'all', support_url: 'https://t.me/telegram',
+  caught: [{warehouse: 'Ростов-на-Дону', start: '2026-09-21 20:00', end: '08:00', rate: 3200}],
+  history: [{title: 'Пополнение по ключу', amount: 300, at: '2026-09-20 12:10'}]};
+function mock(p, b) {
+  return new Promise((res, rej) => setTimeout(() => {
+    if (p === '/api/settings') Object.assign(demo, b);
+    if (p === '/api/ozon/code-confirm') { demo.ozon_linked = true; demo.phone = b.phone; }
+    if (p === '/api/ozon/unlink') { demo.ozon_linked = false; demo.phone = ''; demo.worker_running = false; }
+    if (p === '/api/toggle-worker') demo.worker_running = !demo.worker_running;
+    if (p === '/api/balance/key') { if (!b.key) return rej(new Error('Неверный ключ')); demo.balance += 100; }
+    if (p === '/api/balance/topup') return res({url: ''});
+    res(JSON.parse(JSON.stringify(demo)));
+  }, 250));
+}
+
+/* ---------- Утилиты UI ---------- */
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2800);
+  try { tg.HapticFeedback.notificationOccurred('error'); } catch (e) {}
+}
+function seg(key, opts) {
+  return '<div class="seg">' + opts.map(o =>
+    `<button data-act="seg" data-k="${key}" data-v="${o[0]}" class="${F[key] === o[0] ? 'on' : ''}">${o[1]}</button>`).join('') + '</div>';
+}
+function applyState(d) {
+  S = d;
+  F = {warehouse: d.warehouse || (d.warehouses && d.warehouses[0]) || '', min_rate: d.min_rate || 0,
+       rate_type: d.rate_type || 'shift', time_filter: d.time_filter || 'all'};
+}
+async function run(fn) {
+  if (busy) return; busy = true;
+  try { await fn(); } catch (e) { toast(e.message || 'Что-то пошло не так'); }
+  busy = false; render();
+}
+
+/* ---------- Экраны ---------- */
+function header() {
+  const u = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {first_name: 'Демо'};
+  const name = esc([u.first_name, u.last_name].filter(Boolean).join(' '));
+  const ava = u.photo_url ? `<img src="${esc(u.photo_url)}" class="w-11 h-11 rounded-full object-cover" alt="">`
+    : `<div class="w-11 h-11 rounded-full grad flex items-center justify-center font-bold text-lg">${esc((u.first_name || '?')[0])}</div>`;
+  const run_ = S.worker_running;
+  return `<div class="flex items-center gap-3 mb-4">${ava}
+    <div class="flex-1 min-w-0"><div class="font-bold truncate">${name}</div>
+      <span class="pill mt-1"><span class="dot ${run_ ? 'on-dot' : 'off-dot'}"></span>${run_ ? 'Активен' : 'Остановлен'}</span></div>
+    <div class="text-right"><div class="text-xs mut">Баланс</div><div class="font-extrabold text-lg">${rub(S.balance)}</div></div></div>`;
+}
+
+function viewCatch() {
+  const wh = (S.warehouses || []).map(w => `<option ${w === F.warehouse ? 'selected' : ''}>${esc(w)}</option>`).join('');
+  const last = (S.caught || []).slice(0, 5).map(c => `
+    <div class="flex justify-between py-2 border-t" style="border-color:var(--line)">
+      <div><div class="font-semibold">${esc(c.warehouse)}</div><div class="text-sm mut">${esc(c.start)} – ${esc(c.end)}</div></div>
+      <div class="font-bold">${c.rate ? rub(c.rate) : ''}</div></div>`).join('');
+  const btn = S.worker_running
+    ? `<button class="btn btn-stop" data-act="toggle">Остановить ловлю</button>`
+    : `<button class="btn grad" data-act="toggle">Запустить ловлю · ${rub(S.price)} за смену</button>`;
+  return `<div class="card">${btn}
+      <p class="text-sm mut mt-3 text-center">${S.worker_running ? 'Проверяем смены и забронируем подходящую. Пришлём уведомление в Telegram.' : 'Плата списывается только за пойманную смену.'}</p></div>
+    <div class="card"><span class="lbl">Склад</span>
+      <select id="wh" class="inp mb-4">${wh}</select>
+      <span class="lbl">Ставка не ниже</span>
+      <input id="rate" class="inp mb-2" type="number" inputmode="numeric" min="0" value="${esc(F.min_rate)}">
+      ${seg('rate_type', [['shift', 'За смену'], ['hour', 'За час']])}
+      <span class="lbl mt-4">Время смен</span>
+      ${seg('time_filter', [['all', 'Все'], ['day', 'Дневные'], ['night', 'Ночные']])}
+      <button class="btn btn-sec mt-4" data-act="save">Сохранить фильтры</button></div>
+    <div class="card"><div class="font-bold mb-1">Пойманные смены</div>
+      ${last || '<div class="mut text-sm">Пока пусто. Запустите ловлю, и смены появятся здесь.</div>'}</div>`;
+}
+
+function viewBalance() {
+  const h = (S.history || []).map(x => `
+    <div class="flex justify-between py-2 border-t" style="border-color:var(--line)">
+      <div><div class="font-semibold">${esc(x.title)}</div><div class="text-sm mut">${esc(x.at)}</div></div>
+      <div class="font-bold" style="color:${x.amount >= 0 ? 'var(--ok)' : '#fff'}">${x.amount >= 0 ? '+' : ''}${rub(x.amount)}</div></div>`).join('');
+  return `<div class="card"><div class="mut text-sm">Текущий баланс</div><div class="text-3xl font-extrabold">${rub(S.balance)}</div></div>
+    <div class="card"><span class="lbl">Сумма пополнения (от ${rub(S.min_topup || 100)})</span>
+      <input id="amt" class="inp mb-3" type="number" inputmode="numeric" value="${esc(S.min_topup || 100)}">
+      <button class="btn grad" data-act="topup">Пополнить</button></div>
+    <div class="card"><span class="lbl">Ключ пополнения</span>
+      <input id="key" class="inp mb-3" placeholder="XXXX-XXXX-XXXX-XXXX" autocapitalize="characters">
+      <button class="btn btn-sec" data-act="key">Активировать ключ</button></div>
+    <div class="card"><div class="font-bold mb-1">История</div>${h || '<div class="mut text-sm">Операций пока нет.</div>'}</div>`;
+}
+
+function viewAccount() {
+  const link = S.ozon_linked
+    ? `<div class="flex items-center justify-between"><div><div class="text-sm mut">Телефон Ozon Job</div><div class="font-bold text-lg">${esc(S.phone)}</div></div>
+         <span class="pill"><span class="dot on-dot"></span>Подключён</span></div>
+       <button class="btn btn-sec mt-4" data-act="unlink">Отвязать аккаунт</button>`
+    : `<span class="lbl">Телефон, указанный в Ozon Job</span>
+       <input id="phone" class="inp mb-3" type="tel" inputmode="tel" placeholder="+7 900 000-00-00" value="${esc(phoneVal)}">
+       ${codeSent ? `<span class="lbl">Код из SMS или из приложения Ozon</span>
+         <input id="code" class="inp mb-3" inputmode="numeric" maxlength="8" placeholder="Код">
+         <button class="btn grad" data-act="confirm">Подтвердить</button>
+         <button class="btn btn-sec mt-2" data-act="req">Отправить код ещё раз</button>`
+       : `<button class="btn grad" data-act="req">Получить код</button>`}
+       <p class="text-xs mut mt-3">Пароль не нужен. Мы получаем доступ по коду и храним его в зашифрованном виде.</p>`;
+  return `<div class="card"><div class="font-bold mb-3">Аккаунт Ozon Job</div>${link}</div>
+    <div class="card"><div class="font-bold mb-2">Поддержка</div>
+      <button class="btn btn-sec" data-act="support">Написать администратору</button></div>
+    <p class="text-xs mut text-center px-4">Автоматическое бронирование может нарушать правила Ozon. Используйте на свой риск.</p>`;
+}
+
+function render() {
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.v === tab));
+  if (!S) { $('#app').innerHTML = '<div class="text-center mut mt-24">Загрузка…</div>'; return; }
+  $('#app').innerHTML = header() + (tab === 'catch' ? viewCatch() : tab === 'balance' ? viewBalance() : viewAccount());
+}
+
+/* ---------- Действия ---------- */
+function readFilters() {
+  const w = $('#wh'), r = $('#rate');
+  if (w) F.warehouse = w.value;
+  if (r) F.min_rate = Math.max(0, parseInt(r.value, 10) || 0);
+  return {warehouse: F.warehouse, min_rate: F.min_rate, rate_type: F.rate_type, time_filter: F.time_filter};
+}
+const val = id => ($(id) ? $(id).value.trim() : '');
+
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act; hap();
+  if (a === 'tab') { if (tab === 'catch') readFilters(); tab = b.dataset.v; return render(); }
+  if (a === 'seg') { readFilters(); F[b.dataset.k] = b.dataset.v; return render(); }
+  if (a === 'support') { const u = S.support_url; return tg && tg.openTelegramLink ? tg.openTelegramLink(u) : window.open(u, '_blank'); }
+  if (a === 'save') return run(async () => { applyState(await api('/api/settings', readFilters())); toast('Фильтры сохранены'); });
+  if (a === 'toggle') return run(async () => {
+    if (!S.worker_running) {
+      if (!S.ozon_linked) { tab = 'account'; throw new Error('Сначала подключите аккаунт Ozon Job'); }
+      if (S.balance < S.price) { tab = 'balance'; throw new Error('Недостаточно средств. Нужно ' + rub(S.price)); }
+      applyState(await api('/api/settings', readFilters()));
+    }
+    applyState(await api('/api/toggle-worker', {}));
+  });
+  if (a === 'topup') return run(async () => {
+    const amount = parseInt(val('#amt'), 10) || 0;
+    if (amount < (S.min_topup || 100)) throw new Error('Минимальная сумма ' + rub(S.min_topup || 100));
+    const d = await api('/api/balance/topup', {amount});
+    if (!d.url) throw new Error('Оплата недоступна в демо-режиме');
+    tg && tg.openLink ? tg.openLink(d.url) : window.open(d.url, '_blank');
+  });
+  if (a === 'key') return run(async () => {
+    const key = val('#key'); if (!key) throw new Error('Введите ключ пополнения');
+    applyState(await api('/api/balance/key', {key})); toast('Ключ активирован');
+  });
+  if (a === 'req') return run(async () => {
+    phoneVal = val('#phone'); if (phoneVal.replace(/\D/g, '').length < 10) throw new Error('Введите номер телефона полностью');
+    await api('/api/ozon/code-request', {phone: phoneVal}); codeSent = true; toast('Код отправлен');
+  });
+  if (a === 'confirm') return run(async () => {
+    phoneVal = val('#phone'); const code = val('#code'); if (!code) throw new Error('Введите код');
+    applyState(await api('/api/ozon/code-confirm', {phone: phoneVal, code})); codeSent = false; toast('Аккаунт подключён');
+  });
+  if (a === 'unlink') return run(async () => { applyState(await api('/api/ozon/unlink', {})); });
+});
+
+async function refresh() {
+  if (busy || document.hidden || (document.activeElement && document.activeElement.tagName === 'INPUT')) return;
+  try { const d = await api('/api/auth', {}); const keep = {...F}; applyState(d); F = keep; render(); } catch (e) {}
+}
+
+(async () => {
+  render();
+  try { applyState(await api('/api/auth', {})); }
+  catch (e) { $('#app').innerHTML = '<div class="card mt-16 text-center">Не удалось войти.<br><span class="mut text-sm">Откройте приложение через бота в Telegram.</span></div>'; return; }
+  render(); setInterval(refresh, 10000);
+})();
+</script>
+</body>
+</html>
